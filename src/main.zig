@@ -28,21 +28,58 @@ pub fn Rope() type {
             };
         }
 
-        pub fn insert(self: *Self, idx: usize, data: []const u8) !void {
-            var newNode = try self.gpa.create(Node);
-            newNode.*.leaf = .{
-                .data = data,
-                .weight = data.len,
+        pub fn deinitNode(self: *Self, maybe_node: ?*Node) void {
+            if (maybe_node) |node| {
+                switch (node) {
+                    .branch => |branch| {
+                        self.deinitNode(branch.left);
+                        self.deinitNode(branch.right);
+                    },
+                    .leaf => {},
+                }
+                self.gpa.destroy(node);
+            }
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.deinitNode(self.root);
+        }
+
+        fn newLeaf(self: *Self, data: []const u8) !*Node {
+            var node = try self.gpa.create(Node);
+            node.* = .{
+                .leaf = .{
+                    .data = data,
+                    .weight = data.len,
+                },
             };
 
-            if (idx == 0) {
-                var newLeaf = try self.gpa.create(Node);
-                newLeaf.branch = .{
-                    .weight = newNode.leaf.weight,
-                    .left = newNode,
-                    .right = null,
-                };
-                self.root = newNode;
+            return node;
+        }
+
+        fn newBranch(self: *Self, left: *Node, right: *Node, weight: usize) !*Node {
+            var node = try self.gpa.create(Node);
+            node.* = .{
+                .branch = .{
+                    .left = left,
+                    .right = right,
+                    .weight = weight,
+                },
+            };
+
+            return node;
+        }
+
+        pub fn insert(self: *Self, idx: usize, data: []const u8) !void {
+            const leaf = try self.newLeaf(data);
+
+            if (self.root) |root| {
+                if (idx == 0) {
+                    const branch = try self.newBranch(leaf, root, leaf.leaf.weight);
+                    self.root = branch;
+                }
+            } else {
+                self.root = leaf;
             }
         }
 
@@ -90,11 +127,12 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     var rope = Rope().init(allocator);
+    defer rope.deinit();
+
     try rope.insert(0, " world");
     try rope.insert(0, "Hello");
 
     rope.print();
-
 }
 
 test "rope" {
